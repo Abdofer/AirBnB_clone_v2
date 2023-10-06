@@ -1,75 +1,64 @@
 #!/usr/bin/python3
-import os.path
+import os
+from fabric.api import *
 from datetime import datetime
-from fabric.api import env
-from fabric.api import local
-from fabric.api import put
-from fabric.api import run
 
-env.hosts = ['100.25.19.204', '54.157.159.85']
+env.hosts = ['54.146.56.232', '34.207.58.85']
+env.user = 'ubuntu'
+env.key_filename = '~/.ssh/id_rsa'
 
 
+@runs_once
 def do_pack():
-    """Create a tar gzipped archive of the directory web_static."""
-    dt = datetime.utcnow()
-    file = "versions/web_static_{}{}{}{}{}{}.tgz".format(dt.year,
-                                                         dt.month,
-                                                         dt.day,
-                                                         dt.hour,
-                                                         dt.minute,
-                                                         dt.second)
-    if os.path.isdir("versions") is False:
-        if local("mkdir -p versions").failed is True:
-            return None
-    if local("tar -cvzf {} web_static".format(file)).failed is True:
+    """
+    generates a .tgz archive from the
+    contents of the web_static folder
+    """
+    try:
+        local('mkdir -p versions')
+        name = "web_static_{}".format(
+            datetime.now().strftime("%Y%m%d%H%M%S")
+        )
+        local("tar -cvzf versions/{}.tgz {}".format(
+            name, "web_static/"))
+        size = os.path.getsize("./versions/{}.tgz".format(name))
+        print("web_static packed: versions/{}.tgz -> {}Bytes".format(
+            name, size))
+        return "versions/{}.tgz".format(name)
+    except Exception as e:
         return None
-    return file
 
 
 def do_deploy(archive_path):
-    """Distributes an archive to a web server.
-
-    Args:
-        archive_path (str): The path of the archive to distribute.
-    Returns:
-        If the file doesn't exist at archive_path or an error occurs - False.
-        Otherwise - True.
     """
-    if os.path.isfile(archive_path) is False:
+    Connect to the remote server
+    """
+    file_d = archive_path.split('/')[1]
+    try:
+        put(archive_path, '/tmp/{}'.format(file_d))
+        run('mkdir -p /data/web_static/releases/{}'.format(file_d))
+        run('tar -xzf /tmp/{} -C /data/web_static/releases/{}'.format(
+            file_d, file_d))
+        run('rm /tmp/{}'.format(file_d))
+        run('mv /data/web_static/releases/{}/web_static/*\
+            /data/web_static/releases/{}/'.format(file_d, file_d))
+        run('rm -rf /data/web_static/releases/{}/web_static'.format(
+            file_d))
+        run('rm -rf /data/web_static/current')
+        run('ln -s /data/web_static/releases/{}/ \
+        /data/web_static/current'.format(file_d))
+        print("New version deployed!")
+        return True
+    except Exception:
+        print("New version not deployed!!!!!")
         return False
-    file = archive_path.split("/")[-1]
-    name = file.split(".")[0]
-
-    if put(archive_path, "/tmp/{}".format(file)).failed is True:
-        return False
-    if run("rm -rf /data/web_static/releases/{}/".
-           format(name)).failed is True:
-        return False
-    if run("mkdir -p /data/web_static/releases/{}/".
-           format(name)).failed is True:
-        return False
-    if run("tar -xzf /tmp/{} -C /data/web_static/releases/{}/".
-           format(file, name)).failed is True:
-        return False
-    if run("rm /tmp/{}".format(file)).failed is True:
-        return False
-    if run("mv /data/web_static/releases/{}/web_static/* "
-           "/data/web_static/releases/{}/".format(name, name)).failed is True:
-        return False
-    if run("rm -rf /data/web_static/releases/{}/web_static".
-           format(name)).failed is True:
-        return False
-    if run("rm -rf /data/web_static/current").failed is True:
-        return False
-    if run("ln -s /data/web_static/releases/{}/ /data/web_static/current".
-           format(name)).failed is True:
-        return False
-    return True
 
 
 def deploy():
-    """Create and distribute an archive to a web server."""
-    file = do_pack()
-    if file is None:
+    """
+    creates and distributes an archive to your web servers
+    """
+    store_path = do_pack()
+    if store_path is None:
         return False
-    return do_deploy(file)
+    return do_deploy(store_path)
